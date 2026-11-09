@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A receipt with a torn bottom edge and a yellow highlighted total. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+  android:width="108dp"
+  android:height="108dp"
+  android:viewportWidth="108"
+  android:viewportHeight="108">
+  <path
+    android:fillColor="#FFFFFFFF"
+    android:pathData="M36,28 L72,28 L72,78 L68,75 L64,78 L60,75 L56,78 L52,75 L48,78 L44,75 L40,78 L36,75 Z" />
+  <path
+    android:fillColor="#FF15191C"
+    android:pathData="M42,36 L66,36 L66,39 L42,39 Z M42,44 L66,44 L66,47 L42,47 Z M42,52 L58,52 L58,55 L42,55 Z" />
+  <path
+    android:fillColor="#FFFFE33A"
+    android:pathData="M42,60 L66,60 L66,67 L42,67 Z" />
+  <path
+    android:fillColor="#FF15191C"
+    android:pathData="M45,62.5 L63,62.5 L63,64.5 L45,64.5 Z" />
+</vector>

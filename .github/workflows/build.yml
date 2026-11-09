@@ -1,0 +1,53 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build the signed APK
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace assembleRelease
+
+      - name: Name the APK
+        run: |
+          mkdir -p out
+          cp app/build/outputs/apk/release/app-release.apk "out/ExpenseScanner-1.0.${{ github.run_number }}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ExpenseScanner-apk
+          path: out/*.apk
+
+      - name: Publish a release with the APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Expense Scanner 1.0.${{ github.run_number }}
+          body: |
+            Open this page on your Android phone, tap the .apk file below to download it, then open it to install.
+            Installing a newer version keeps all your bills.
+          files: out/*.apk
+          make_latest: true
