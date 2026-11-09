@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -248,7 +249,9 @@ fun BillScreen(id: String, onBack: () -> Unit, notify: (String) -> Unit) {
       Gap(8)
       SectionLabel("Where it was spent")
       Gap(6)
-      LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+      // Start the row at the chosen category so it's visible without scrolling.
+      val chips = rememberLazyListState(initialFirstVisibleItemIndex = settings.categories.indexOfFirst { it.id == form.category }.coerceAtLeast(0))
+      LazyRow(state = chips, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         items(settings.categories, key = { it.id }) { c ->
           FilterChip(selected = form.category == c.id, onClick = { form.category = c.id }, label = { Text("${c.icon} ${c.name}") })
         }

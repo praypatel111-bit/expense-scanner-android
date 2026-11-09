@@ -4,6 +4,7 @@ import com.expensescanner.app.core.AppSettings
 import com.expensescanner.app.core.Extract
 import com.expensescanner.app.core.Extraction
 import com.expensescanner.app.data.Prefs
+import android.util.Log
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.ConversationConfig
@@ -32,6 +33,20 @@ class GemmaReader(private val models: ModelManager, private val prefs: Prefs) {
     val eng = ensureEngine() ?: return null
     val ids = settings.categories.map { it.id }
     val prompt = Extract.buildPrompt(rows, settings, today)
+    try {
+      return readWith(eng, prompt, ids)
+    } catch (e: Exception) {
+      if (backendName != "GPU") throw e
+      // The graphics chip failed during a real read: use the CPU from now on and try again.
+      Log.w(TAG, "GPU failed while reading, switching to the CPU", e)
+      giveUpOnGpu()
+      release()
+      val cpu = ensureEngine() ?: throw e
+      return readWith(cpu, prompt, ids)
+    }
+  }
+
+  private fun readWith(eng: Engine, prompt: String, ids: List<String>): Extraction? {
     val constrained = try {
       Extract.fromModel(ask(eng, prompt, ResponseFormat.json(Extract.schema(ids))), ids)
     } catch (e: Exception) {
@@ -62,20 +77,39 @@ class GemmaReader(private val models: ModelManager, private val prefs: Prefs) {
     val path = models.file.absolutePath
     val order = if (prefs.useGpu && !gpuFailed) listOf("GPU", "CPU") else listOf("CPU")
     for (name in order) {
+      var e: Engine? = null
       try {
         // Room for a long receipt (prompt is capped near 2,600 tokens) plus the answer.
-        val e = Engine(EngineConfig(modelPath = path, backend = if (name == "GPU") Backend.GPU() else Backend.CPU(), maxNumTokens = 6144))
+        e = Engine(EngineConfig(modelPath = path, backend = if (name == "GPU") Backend.GPU() else Backend.CPU(), maxNumTokens = 6144))
         e.initialize()
+        // Some phones accept the graphics chip at load time and only fail on the first run
+        // (no OpenCL). A one-word answer finds out in about a second.
+        if (name == "GPU") probe(e)
         engine = e
         backendName = name
         lastError = ""
+        Log.i(TAG, "AI reader loaded on the $name")
         return e
       } catch (t: Throwable) {
         lastError = "$name: ${t.message ?: t}"
-        if (name == "GPU") gpuFailed = true
+        Log.w(TAG, "AI reader couldn't start on the $name", t)
+        runCatching { e?.close() }
+        if (name == "GPU") giveUpOnGpu()
       }
     }
     return null
+  }
+
+  private fun probe(e: Engine) {
+    e.createConversation(ConversationConfig(samplerConfig = SamplerConfig(topK = 1, topP = 1.0, temperature = 0.0), maxOutputToken = 1)).use {
+      it.sendMessage("Hi", extraContext = NO_THINKING, maxOutputToken = 1)
+    }
+  }
+
+  /** Remembered across restarts; Settings shows the switch turned off and it can be turned back on. */
+  private fun giveUpOnGpu() {
+    gpuFailed = true
+    prefs.useGpu = false
   }
 
   @Synchronized
@@ -88,6 +122,7 @@ class GemmaReader(private val models: ModelManager, private val prefs: Prefs) {
   }
 
   private companion object {
+    const val TAG = "ExpenseScanner"
     const val MAX_OUTPUT = 1600
     // Gemma 4 can "think" before answering; a receipt doesn't need it and it would cost time.
     val NO_THINKING: Map<String, Any> = mapOf("enable_thinking" to false)

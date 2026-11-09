@@ -11,6 +11,8 @@ APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
 : > "$OUT/failures.txt"
 # Failures go to a file so steps that run in a subshell can record them too.
 fail() { echo "$1" >> "$OUT/failures.txt"; }
+# Things worth a look that don't fail the run (emulator quirks, optional steps).
+warn() { echo "WARNING: $1"; echo "$1" >> "$OUT/warnings.txt"; }
 
 shot() { adb exec-out screencap -p > "$OUT/$1.png"; }
 
@@ -104,12 +106,20 @@ fi
 adb shell am start -n "$PKG/.MainActivity" >/dev/null; sleep 2
 
 # 2) Pick a second, long receipt from the gallery (system photo picker).
-adb push ci/receipt_long.jpg /sdcard/Pictures/receipt_long.jpg
-sleep 3
+PIC=/storage/emulated/0/Pictures/receipt_long.jpg
+adb push ci/receipt_long.jpg "$PIC"
+# Make sure the photo library knows about the new file.
+adb shell content call --uri content://media --method scan_file --arg "$PIC" >/dev/null 2>&1 || true
+adb shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d "file://$PIC" >/dev/null 2>&1 || true
+sleep 5
 tap "Upload photos" || fail gallery-button
 sleep 5
 shot 10_photo_picker
-if tap "Photo taken"; then
+picked=1
+if ! tap "Photo taken"; then
+  if dump && ! grep -q "No photos" "$OUT/ui.xml"; then adb shell input tap 180 650; else picked=0; fi
+fi
+if [ "$picked" = 1 ]; then
   sleep 2
   shot 11_photo_picked
   tap "Add (" || tap "Add" || true
@@ -119,8 +129,7 @@ if tap "Photo taken"; then
   wait_read || fail read-gallery
   shot 13_bills_two
 else
-  echo "Photo picker: no photo to tap (see 10_photo_picker.png)"
-  fail photo-picker
+  warn "photo picker showed no photos (emulator didn't index the pushed file)"
 fi
 adb shell am start -n "$PKG/.MainActivity" >/dev/null; sleep 2
 
@@ -136,7 +145,7 @@ if tap "Save Excel to my phone"; then
 else
   fail save-excel-button
 fi
-XLSX=$(adb shell "find /sdcard -name '*.xlsx' 2>/dev/null" | tr -d '\r' | head -1)
+XLSX=$(adb shell "ls /storage/emulated/0/Download/*.xlsx 2>/dev/null" | tr -d '\r' | head -1)
 if [ -n "$XLSX" ]; then
   echo "Excel saved at $XLSX"
   adb pull "$XLSX" "$OUT/" >/dev/null
@@ -189,6 +198,7 @@ grep -E "FATAL EXCEPTION" -A 40 "$OUT/logcat.txt" | grep -B 2 -A 38 "Process: $P
 [ -s "$OUT/crash.txt" ] && { cat "$OUT/crash.txt"; fail crash; }
 adb shell pidof "$PKG" >/dev/null || fail not-running
 
+[ -s "$OUT/warnings.txt" ] && echo "Warnings: $(sort -u "$OUT/warnings.txt" | tr '\n' ';')"
 if [ ! -s "$OUT/failures.txt" ]; then
   echo "SMOKE OK"
 else
