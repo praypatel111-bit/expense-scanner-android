@@ -24,7 +24,11 @@ android {
     versionCode = runNumber
     versionName = "1.0.$runNumber"
     // Phones that can run the AI reader (8 GB+) are all 64-bit ARM; this keeps the APK small.
-    ndk { abiFilters.add("arm64-v8a") }
+    ndk {
+      abiFilters.add("arm64-v8a")
+      // The emulator smoke test (ci/smoke.sh) builds with -PwithX86.
+      if (project.hasProperty("withX86")) abiFilters.add("x86_64")
+    }
   }
 
   signingConfigs {

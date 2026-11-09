@@ -3,6 +3,12 @@ name: Build APK
 on:
   push:
     branches: [main]
+    # Test files and docs don't change the app, so they don't make a new release.
+    paths-ignore:
+      - "ci/**"
+      - ".github/workflows/smoke.yml"
+      - "jvmtest/**"
+      - "README.md"
   workflow_dispatch:
 
 permissions:
