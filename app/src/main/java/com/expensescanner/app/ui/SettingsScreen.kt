@@ -141,7 +141,7 @@ fun SettingsScreen(notify: (String) -> Unit) {
         app.prefs.useGpu = it
         app.processor.releaseModel()
       }
-      Text("This phone: about ${String.format(java.util.Locale.US, "%.1f", ram)} GB of memory.", color = p.muted, fontSize = 12.sp)
+      if (ram >= 7.0) Text("This phone: about ${String.format(java.util.Locale.US, "%.1f", ram)} GB of memory.", color = p.muted, fontSize = 12.sp)
     }
 
     Gap(12)

@@ -4,6 +4,7 @@ package com.expensescanner.app.ui
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -209,7 +210,8 @@ suspend fun saveBills(ctx: Context, uris: List<Uri>, cat: String, note: String, 
       app.store.upsert(bill)
       app.processor.enqueue(id)
       saved++
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+      Log.w("ExpenseScanner", "Couldn't import $u", e)
     }
     if (u.authority == ctx.packageName + ".files") u.lastPathSegment?.let { File(File(ctx.cacheDir, "captures"), it).delete() }
   }

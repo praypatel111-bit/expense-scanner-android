@@ -13,6 +13,9 @@ val signing = Properties().apply {
 }
 val runNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
 
+/** Emulator smoke-test build (./gradlew assembleRelease -PsmokeTest): adds x86_64 and debugging. */
+val smokeTest = project.hasProperty("smokeTest")
+
 android {
   namespace = "com.expensescanner.app"
   compileSdk { this.version = release(37) { minorApiLevel = 0 } }
@@ -26,8 +29,8 @@ android {
     // Phones that can run the AI reader (8 GB+) are all 64-bit ARM; this keeps the APK small.
     ndk {
       abiFilters.add("arm64-v8a")
-      // The emulator smoke test (ci/smoke.sh) builds with -PwithX86.
-      if (project.hasProperty("withX86")) abiFilters.add("x86_64")
+      // The emulator smoke test (ci/smoke.sh) builds with -PsmokeTest.
+      if (smokeTest) abiFilters.add("x86_64")
     }
   }
 
@@ -44,6 +47,8 @@ android {
     release {
       isMinifyEnabled = false
       signingConfig = signingConfigs.getByName("release")
+      // Only the smoke-test build: lets the test put a photo into the app's own folder.
+      isDebuggable = smokeTest
     }
     debug {
       signingConfig = signingConfigs.getByName("release")

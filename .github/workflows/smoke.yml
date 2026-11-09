@@ -25,7 +25,10 @@ jobs:
       - name: Build the APK (plus x86_64 for the emulator)
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon assembleRelease -PwithX86
+          ./gradlew --no-daemon assembleRelease -PsmokeTest
+
+      - name: Tools for checking the exported Excel file
+        run: pip install --quiet openpyxl
 
       - name: Enable KVM
         run: |
