@@ -8,14 +8,30 @@ PKG=com.expensescanner.app
 OUT=shots
 mkdir -p "$OUT"
 APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
-FAILED=""
+: > "$OUT/failures.txt"
+# Failures go to a file so steps that run in a subshell can record them too.
+fail() { echo "$1" >> "$OUT/failures.txt"; }
 
 shot() { adb exec-out screencap -p > "$OUT/$1.png"; }
 
+# Screen contents into $OUT/ui.xml. A system "… isn't responding" dialog blocks every tap, so it
+# is closed here (and recorded if it's about this app).
 dump() {
-  for _ in 1 2 3 4 5 6; do
-    adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 && adb pull /sdcard/ui.xml "$OUT/ui.xml" >/dev/null 2>&1 && return 0
-    sleep 2
+  local who btn c
+  for _ in 1 2 3 4 5 6 7 8; do
+    if adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 && adb pull /sdcard/ui.xml "$OUT/ui.xml" >/dev/null 2>&1; then
+      who=$(grep -oE 'text="[^"]*responding[^"]*"' "$OUT/ui.xml" | head -1)
+      if [ -z "$who" ]; then return 0; fi
+      echo "System dialog: $who" >&2
+      case "$who" in
+        *"Expense Scanner"*) fail app-not-responding; btn="Wait" ;;
+        *) btn="Close app" ;;
+      esac
+      c=$(python3 ci/find.py "$OUT/ui.xml" "$btn") && adb shell input tap $c
+      sleep 3
+    else
+      sleep 2
+    fi
   done
   return 1
 }
@@ -27,13 +43,13 @@ tap() {
   local c
   for _ in 1 2 3; do
     if c=$(coords "$1"); then
-      echo "tap '$1' at $c"
+      echo "tap '$1' at $c" >&2
       adb shell input tap $c
       return 0
     fi
     sleep 2
   done
-  echo "NOT FOUND: $1"
+  echo "NOT FOUND: $1" >&2
   return 1
 }
 
@@ -49,6 +65,10 @@ wait_read() {
 
 adb logcat -c
 adb install -r "$APK" || { echo "INSTALL FAILED"; exit 1; }
+# Let the freshly booted system settle, and clear any dialog it left behind.
+adb shell input keyevent 82 >/dev/null 2>&1
+sleep 25
+dump >/dev/null || true
 adb shell am start -W -n "$PKG/.MainActivity"
 sleep 8
 shot 01_bills_empty
@@ -65,10 +85,10 @@ adb shell am start -n "$PKG/.MainActivity" -a android.intent.action.SEND -t imag
   --eu android.intent.extra.STREAM "content://$PKG.files/captures/receipt.jpg"
 sleep 5
 shot 04_capture_sheet
-tap "Meals" || FAILED="$FAILED share-sheet"
+tap "Meals" || fail share-sheet
 sleep 2
 shot 05_saved
-wait_read || FAILED="$FAILED read-shared"
+wait_read || fail read-shared
 shot 06_bills_one
 
 if tap "Tim Hortons" || tap "Unknown vendor"; then
@@ -77,16 +97,16 @@ if tap "Tim Hortons" || tap "Unknown vendor"; then
   adb shell input swipe 540 1900 540 600 300; sleep 2; shot 08_bill_detail_more
   adb shell input swipe 540 1900 540 600 300; sleep 2; shot 09_bill_detail_end
   adb shell input keyevent 4; sleep 3
-  coords "Report" >/dev/null || { echo "Back from a bill didn't return to the list"; FAILED="$FAILED back"; }
+  coords "Report" >/dev/null || { echo "Back from a bill didn't return to the list"; fail back; }
 else
-  FAILED="$FAILED open-bill"
+  fail open-bill
 fi
 adb shell am start -n "$PKG/.MainActivity" >/dev/null; sleep 2
 
 # 2) Pick a second, long receipt from the gallery (system photo picker).
 adb push ci/receipt_long.jpg /sdcard/Pictures/receipt_long.jpg
 sleep 3
-tap "Upload photos" || FAILED="$FAILED gallery-button"
+tap "Upload photos" || fail gallery-button
 sleep 5
 shot 10_photo_picker
 if tap "Photo taken"; then
@@ -95,12 +115,12 @@ if tap "Photo taken"; then
   tap "Add (" || tap "Add" || true
   sleep 5
   shot 12_capture_sheet_gallery
-  tap "Office Supplies" || FAILED="$FAILED gallery-sheet"
-  wait_read || FAILED="$FAILED read-gallery"
+  tap "Office Supplies" || fail gallery-sheet
+  wait_read || fail read-gallery
   shot 13_bills_two
 else
   echo "Photo picker: no photo to tap (see 10_photo_picker.png)"
-  FAILED="$FAILED photo-picker"
+  fail photo-picker
 fi
 adb shell am start -n "$PKG/.MainActivity" >/dev/null; sleep 2
 
@@ -110,20 +130,20 @@ adb shell input swipe 540 1900 540 700 300; sleep 2; shot 15_report_export
 if tap "Save Excel to my phone"; then
   sleep 8
   shot 16_save_dialog
-  tap "Save" || FAILED="$FAILED save-dialog"
+  tap "Save" || fail save-dialog
   sleep 5
   shot 17_saved_excel
 else
-  FAILED="$FAILED save-excel-button"
+  fail save-excel-button
 fi
 XLSX=$(adb shell "find /sdcard -name '*.xlsx' 2>/dev/null" | tr -d '\r' | head -1)
 if [ -n "$XLSX" ]; then
   echo "Excel saved at $XLSX"
   adb pull "$XLSX" "$OUT/" >/dev/null
-  python3 ci/check_xlsx.py "$OUT"/*.xlsx || FAILED="$FAILED excel-file"
+  python3 ci/check_xlsx.py "$OUT"/*.xlsx || fail excel-file
 else
   echo "No Excel file found on the emulator"
-  FAILED="$FAILED excel-missing"
+  fail excel-missing
 fi
 
 # 4) Optional: download the AI model in the app and let it read the long receipt.
@@ -137,7 +157,7 @@ if [ "${SMOKE_AI:-0}" = "1" ]; then
       [ $((i % 12)) -eq 1 ] && shot "20_ai_download_$i"
     done
   else
-    FAILED="$FAILED ai-download-button"
+    fail ai-download-button
   fi
   shot 21_ai_ready
   tap "Bills"; sleep 2
@@ -145,14 +165,14 @@ if [ "${SMOKE_AI:-0}" = "1" ]; then
   adb shell am start -n "$PKG/.MainActivity" -a android.intent.action.SEND -t image/jpeg \
     --eu android.intent.extra.STREAM "content://$PKG.files/captures/receipt_long.jpg"
   sleep 5
-  tap "Let AI pick" || FAILED="$FAILED ai-sheet"
+  tap "Let AI pick" || fail ai-sheet
   for i in $(seq 1 72); do
     sleep 5
     if dump && ! grep -q "Reading the bill" "$OUT/ui.xml"; then echo "AI read after ~$((i * 5)) s"; break; fi
   done
   shot 22_ai_read
   adb logcat -d | grep -E " ExpenseScanner" | grep -E "AI (found|not used)|AI reader failed" | tail -3
-  adb logcat -d | grep -qE "ExpenseScanner: .*AI found" || FAILED="$FAILED ai-not-used"
+  adb logcat -d | grep -qE "ExpenseScanner: .*AI found" || fail ai-not-used
   if tap "Staples"; then
     sleep 4; shot 23_ai_bill
     adb shell input swipe 540 1900 540 600 300; sleep 2; shot 24_ai_bill_more
@@ -166,12 +186,12 @@ echo "----- app log -----"
 grep -E " ExpenseScanner|AndroidRuntime: Process: $PKG" "$OUT/logcat.txt" | tail -60
 echo "-------------------"
 grep -E "FATAL EXCEPTION" -A 40 "$OUT/logcat.txt" | grep -B 2 -A 38 "Process: $PKG" > "$OUT/crash.txt"
-[ -s "$OUT/crash.txt" ] && { cat "$OUT/crash.txt"; FAILED="$FAILED crash"; }
-adb shell pidof "$PKG" >/dev/null || FAILED="$FAILED not-running"
+[ -s "$OUT/crash.txt" ] && { cat "$OUT/crash.txt"; fail crash; }
+adb shell pidof "$PKG" >/dev/null || fail not-running
 
-if [ -z "$FAILED" ]; then
+if [ ! -s "$OUT/failures.txt" ]; then
   echo "SMOKE OK"
 else
-  echo "SMOKE FAILED:$FAILED"
+  echo "SMOKE FAILED: $(sort -u "$OUT/failures.txt" | tr '\n' ' ')"
   exit 1
 fi
