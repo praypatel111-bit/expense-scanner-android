@@ -51,7 +51,14 @@ android {
     targetCompatibility = JavaVersion.VERSION_11
   }
   buildFeatures { compose = true }
-  packaging { jniLibs { pickFirsts.add("**/liblitertlm_jni.so") } }
+  // Compressed code and native libraries: about 30 MB to download instead of 85 MB.
+  packaging {
+    dex { useLegacyPackaging = true }
+    jniLibs {
+      useLegacyPackaging = true
+      pickFirsts.add("**/liblitertlm_jni.so")
+    }
+  }
 }
 
 kotlin {
