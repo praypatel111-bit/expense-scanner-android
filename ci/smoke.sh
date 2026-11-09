@@ -71,13 +71,17 @@ shot 05_saved
 wait_read || FAILED="$FAILED read-shared"
 shot 06_bills_one
 
-tap "Tim Hortons" || tap "Unknown vendor" || FAILED="$FAILED open-bill"
-sleep 4
-shot 07_bill_detail
-adb shell input swipe 540 1900 540 600 300; sleep 2; shot 08_bill_detail_more
-adb shell input swipe 540 1900 540 600 300; sleep 2; shot 09_bill_detail_end
-adb shell input keyevent 4; sleep 3
-coords "Report" >/dev/null || { echo "Back from a bill didn't return to the list"; FAILED="$FAILED back"; }
+if tap "Tim Hortons" || tap "Unknown vendor"; then
+  sleep 4
+  shot 07_bill_detail
+  adb shell input swipe 540 1900 540 600 300; sleep 2; shot 08_bill_detail_more
+  adb shell input swipe 540 1900 540 600 300; sleep 2; shot 09_bill_detail_end
+  adb shell input keyevent 4; sleep 3
+  coords "Report" >/dev/null || { echo "Back from a bill didn't return to the list"; FAILED="$FAILED back"; }
+else
+  FAILED="$FAILED open-bill"
+fi
+adb shell am start -n "$PKG/.MainActivity" >/dev/null; sleep 2
 
 # 2) Pick a second, long receipt from the gallery (system photo picker).
 adb push ci/receipt_long.jpg /sdcard/Pictures/receipt_long.jpg
@@ -97,8 +101,8 @@ if tap "Photo taken"; then
 else
   echo "Photo picker: no photo to tap (see 10_photo_picker.png)"
   FAILED="$FAILED photo-picker"
-  adb shell input keyevent 4; sleep 2
 fi
+adb shell am start -n "$PKG/.MainActivity" >/dev/null; sleep 2
 
 # 3) Report, then "Save Excel to my phone" through the system file picker.
 tap "Report"; sleep 3; shot 14_report
@@ -120,6 +124,41 @@ if [ -n "$XLSX" ]; then
 else
   echo "No Excel file found on the emulator"
   FAILED="$FAILED excel-missing"
+fi
+
+# 4) Optional: download the AI model in the app and let it read the long receipt.
+if [ "${SMOKE_AI:-0}" = "1" ]; then
+  adb shell am start -n "$PKG/.MainActivity" >/dev/null; sleep 2
+  tap "Settings"; sleep 3
+  if tap "Download on Wi-Fi"; then
+    for i in $(seq 1 90); do
+      sleep 10
+      if dump && grep -q "Ready. New bills are read by AI" "$OUT/ui.xml"; then echo "model ready after ~$((i * 10)) s"; break; fi
+      [ $((i % 12)) -eq 1 ] && shot "20_ai_download_$i"
+    done
+  else
+    FAILED="$FAILED ai-download-button"
+  fi
+  shot 21_ai_ready
+  tap "Bills"; sleep 2
+  adb shell "run-as $PKG sh -c 'cat > cache/captures/receipt_long.jpg'" < ci/receipt_long.jpg
+  adb shell am start -n "$PKG/.MainActivity" -a android.intent.action.SEND -t image/jpeg \
+    --eu android.intent.extra.STREAM "content://$PKG.files/captures/receipt_long.jpg"
+  sleep 5
+  tap "Let AI pick" || FAILED="$FAILED ai-sheet"
+  for i in $(seq 1 72); do
+    sleep 5
+    if dump && ! grep -q "Reading the bill" "$OUT/ui.xml"; then echo "AI read after ~$((i * 5)) s"; break; fi
+  done
+  shot 22_ai_read
+  adb logcat -d | grep -E " ExpenseScanner" | grep -E "AI (found|not used)|AI reader failed" | tail -3
+  adb logcat -d | grep -qE "ExpenseScanner: .*AI found" || FAILED="$FAILED ai-not-used"
+  if tap "Staples"; then
+    sleep 4; shot 23_ai_bill
+    adb shell input swipe 540 1900 540 600 300; sleep 2; shot 24_ai_bill_more
+    adb shell input swipe 540 1900 540 600 300; sleep 2; shot 25_ai_bill_end
+    adb shell input keyevent 4; sleep 2
+  fi
 fi
 
 adb logcat -d > "$OUT/logcat.txt"

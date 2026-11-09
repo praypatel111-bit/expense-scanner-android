@@ -20,7 +20,8 @@ object Images {
   fun importPhoto(ctx: Context, uri: Uri, dir: File, name: String): Imported {
     val cr = ctx.contentResolver
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    cr.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) } ?: throw IOException("Can't open the photo")
+    // A bounds-only decode always returns null; the size lands in [bounds].
+    (cr.openInputStream(uri) ?: throw IOException("Can't open the photo")).use { BitmapFactory.decodeStream(it, null, bounds) }
     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw IOException("This file isn't a photo")
     var sample = 1
     while (max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 2400) sample *= 2

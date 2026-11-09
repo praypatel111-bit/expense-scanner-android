@@ -84,7 +84,9 @@ object Exporter {
   }
 
   fun copyTo(ctx: Context, src: File, dest: Uri) {
-    val os = ctx.contentResolver.openOutputStream(dest) ?: throw IOException("Couldn't open the destination")
+    // "wt" truncates when replacing an existing file; not every provider supports it.
+    val cr = ctx.contentResolver
+    val os = runCatching { cr.openOutputStream(dest, "wt") }.getOrNull() ?: cr.openOutputStream(dest) ?: throw IOException("Couldn't open the destination")
     os.use { o -> src.inputStream().use { it.copyTo(o) } }
   }
 

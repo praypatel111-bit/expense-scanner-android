@@ -4,6 +4,11 @@ name: Smoke test on an emulator
 # extra x86_64 library set so it runs on the emulator, then clicks through it (ci/smoke.sh).
 on:
   workflow_dispatch:
+    inputs:
+      ai:
+        description: "Also download the 2.6 GB AI model in the app and let it read a bill"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -11,7 +16,9 @@ permissions:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
+    env:
+      SMOKE_AI: ${{ inputs.ai && '1' || '0' }}
     steps:
       - uses: actions/checkout@v5
 
@@ -26,6 +33,7 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew --no-daemon assembleRelease -PsmokeTest
+          unzip -l app/build/outputs/apk/release/*.apk | grep "lib/"
 
       - name: Tools for checking the exported Excel file
         run: pip install --quiet openpyxl
@@ -43,7 +51,9 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_6
-          ram-size: 3072M
+          cores: 4
+          ram-size: 8192M
+          disk-size: 10G
           disable-animations: true
           script: bash ci/smoke.sh
 
