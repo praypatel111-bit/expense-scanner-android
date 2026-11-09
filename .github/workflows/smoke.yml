@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   smoke:
@@ -49,3 +49,14 @@ jobs:
         with:
           name: smoke-screens
           path: shots/
+
+      # Also keep the screenshots on a separate branch, so they can be fetched with git.
+      - name: Save the screenshots to the smoke-results branch
+        if: always()
+        run: |
+          cd shots
+          git init -q
+          git checkout -q -b smoke-results
+          git add -A
+          git -c user.name="smoke test" -c user.email="smoke@localhost" commit -q -m "Smoke test run ${{ github.run_number }}"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" smoke-results

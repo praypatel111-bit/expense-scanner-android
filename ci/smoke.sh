@@ -47,7 +47,15 @@ sleep 5
 shot 04_capture_sheet
 
 tap "Meals"
-sleep 25
+sleep 3
+shot 04b_after_category
+# Wait (up to 2 minutes) for "Reading the bill…" to disappear from the list.
+for i in $(seq 1 24); do
+  sleep 5
+  if adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 && adb pull /sdcard/ui.xml "$OUT/ui.xml" >/dev/null 2>&1; then
+    if ! grep -q "Reading the bill" "$OUT/ui.xml"; then echo "read after ~$((i * 5)) s"; break; fi
+  fi
+done
 shot 05_bills_after_read
 
 tap "Tim Hortons" || tap "Unknown vendor" || tap "Meals"
@@ -61,7 +69,10 @@ tap "Report"; sleep 3; shot 09_report_with_bill
 adb shell input swipe 540 1900 540 700 300; sleep 2; shot 10_report_export
 
 adb logcat -d > "$OUT/logcat.txt"
-grep -E "FATAL EXCEPTION|AndroidRuntime" -A 40 "$OUT/logcat.txt" > "$OUT/crash.txt"
+echo "----- app log -----"
+grep -E "ExpenseScanner|$PKG|ensescanner" "$OUT/logcat.txt" | grep -vE "PackageManager|BackupManager|AiAiEcho" | tail -120
+echo "-------------------"
+grep -E "FATAL EXCEPTION" -A 40 "$OUT/logcat.txt" | grep -B 2 -A 38 "Process: $PKG" > "$OUT/crash.txt"
 if adb shell pidof "$PKG" >/dev/null && [ ! -s "$OUT/crash.txt" ]; then
   echo "SMOKE OK"
 else
