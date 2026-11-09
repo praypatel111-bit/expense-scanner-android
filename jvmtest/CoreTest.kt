@@ -58,7 +58,27 @@ fun main() {
   println(rec)
   check(rec.total == 14.35 && rec.warnings.isNotEmpty(), "misread total replaced by printed TOTAL")
   check(rec.taxes.size == 1 && rec.taxes[0].amount == 1.65, "invented PST dropped")
-  check(rec.items.size == 2 && rec.confidence == "high", "model items kept, confidence high")
+  check(rec.items.sumOf { it.a ?: 0.0 } == rec.subtotal || rec.items.size == 2, "items: model's if they add up, else the printed ones: " + rec.items.map { it.d })
+  check(rec.confidence == "high", "confidence high")
+
+  // 4b. The model lists summary lines as items: they're dropped, real items kept (even "CARD STOCK").
+  run {
+    val aiItems = listOf(
+      Item("CARD STOCK 100", 1.0, null, 12.99), Item("PENS", 1.0, null, 17.01),
+      Item("SUBTOTAL", null, null, 30.00), Item("HST 13%", null, null, 3.90), Item("TOTAL", null, null, 33.90), Item("MASTERCARD ****0921", null, null, 33.90),
+    )
+    val notes = ArrayList<String>()
+    val picked = Extract.chooseItems(aiItems, emptyList(), 30.00, 33.90, listOf(TaxLine("HST 13%", 13.0, 3.90)), null, notes) { true }
+    check(picked.map { it.d } == listOf("CARD STOCK 100", "PENS") && notes.isEmpty(), "summary lines dropped from model items: " + picked.map { it.d })
+    val rules = listOf(Item("PENS", 1.0, null, 17.01), Item("CARD STOCK 100", 1.0, null, 12.99))
+    val wrong = listOf(Item("PENS", 1.0, null, 17.01), Item("CARD STOCK 100", 1.0, null, 129.90))
+    check(Extract.chooseItems(wrong, rules, 30.00, 33.90, emptyList(), null, ArrayList()) { true } == rules, "printed items win when the model's don't add up")
+    val n2 = ArrayList<String>()
+    Extract.chooseItems(wrong, emptyList(), 30.00, 33.90, emptyList(), null, n2) { true }
+    check(n2.isNotEmpty(), "warning when no item list adds up")
+  }
+  check(RuleParser.cleanVendor("STAPLES") == "Staples" && RuleParser.cleanVendor("LCBO") == "LCBO" &&
+    RuleParser.cleanVendor("TIM HORTONS #1234") == "Tim Hortons" && RuleParser.cleanVendor("McDonald's") == "McDonald's", "vendor names tidied")
 
   // 5. Apply onto a bill
   val settings = AppSettings(businessName = "Northbound Consulting Inc.", personalCards = listOf("4417"))

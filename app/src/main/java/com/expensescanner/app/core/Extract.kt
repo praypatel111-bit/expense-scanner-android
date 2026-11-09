@@ -139,6 +139,30 @@ object Extract {
    * Cross-checks the model against the receipt text and the rule parser. Numbers the model reports
    * must appear in the OCR text; when they don't, the rule parser's reading wins and a note is added.
    */
+  /**
+   * Small models sometimes list the subtotal, a tax, the total or the card payment as bought items.
+   * Those are dropped (a summary-looking name *and* one of those amounts), then whichever list adds
+   * up to the subtotal wins: the model's, else the rule-based reader's.
+   */
+  internal fun chooseItems(
+    aiItems: List<Item>, ruleItems: List<Item>, subtotal: Double?, total: Double?, taxes: List<TaxLine>, tip: Double?,
+    notes: MutableList<String>, seen: (Double?) -> Boolean,
+  ): List<Item> {
+    val summaryAmounts = (listOfNotNull(subtotal, total, tip) + taxes.mapNotNull { it.amount }).map { Books.plain(abs(it)) }.toSet()
+    val ai = aiItems.filterNot { it.a != null && Books.plain(abs(it.a)) in summaryAmounts && RuleParser.isSummaryLine(it.d) }
+    val target = subtotal ?: total?.let { it - taxes.sumOf { t -> t.amount ?: 0.0 } - (tip ?: 0.0) }
+    fun fits(list: List<Item>) = target != null && list.isNotEmpty() && abs(list.sumOf { it.a ?: 0.0 } - target) <= 0.05
+    val chosen = when {
+      ai.isEmpty() -> ruleItems
+      fits(ai) -> ai
+      fits(ruleItems) -> ruleItems
+      ai.count { seen(it.a) } * 2 >= ai.size -> ai
+      else -> ruleItems.ifEmpty { ai }
+    }
+    if (target != null && chosen.size > 1 && !fits(chosen)) notes.add("The items don't add up to the subtotal, so check them against the photo")
+    return chosen
+  }
+
   fun reconcile(ai: Extraction?, rules: Extraction, rows: List<String>, today: LocalDate): Extraction {
     if (ai == null) return rules
     val printed = rows.flatMap { RuleParser.amounts(it) }.map { Books.plain(abs(it.value)) }.toHashSet()
@@ -160,8 +184,8 @@ object Extract {
       aiDate != null && !aiDate.isAfter(today.plusDays(1)) -> ai.date
       else -> rules.date
     }
-    val items = if (ai.items.isNotEmpty() && ai.items.count { seen(it.a) } * 2 >= ai.items.size) ai.items else rules.items.ifEmpty { ai.items }
     val tip = ai.tip?.takeIf { seen(it) } ?: rules.tip
+    val items = chooseItems(ai.items, rules.items, subtotal, total, taxes, tip, notes) { seen(it) }
     val card = ai.cardLast4.takeIf { it.isNotEmpty() && rows.any { r -> r.contains(it) } } ?: rules.cardLast4
     val taxId = ai.vendorTaxId.takeIf { it.isNotEmpty() && it.filter(Char::isDigit).length >= 9 } ?: rules.vendorTaxId
 
@@ -175,7 +199,7 @@ object Extract {
     }
     return Extraction(
       isReceipt = true,
-      vendor = ai.vendor.ifEmpty { rules.vendor },
+      vendor = RuleParser.cleanVendor(ai.vendor).ifEmpty { rules.vendor },
       vendorAddress = ai.vendorAddress.ifEmpty { rules.vendorAddress },
       vendorPhone = rules.vendorPhone,
       vendorTaxId = taxId,

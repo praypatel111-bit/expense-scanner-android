@@ -267,13 +267,22 @@ object RuleParser {
     return null
   }
 
-  private fun cleanVendor(row: String): String {
+  /** "TIM HORTONS #1234" → "Tim Hortons". Short one-word names like LCBO or IKEA keep their capitals. */
+  fun cleanVendor(row: String): String {
     var v = row.replace("|", " ").replace(Regex("""\s+"""), " ").trim().trim('*', '#', '-', '=', ' ')
     v = v.replace(Regex("""\s*#?\d{3,}$"""), "").trim()
-    if (v.isNotEmpty() && v == v.uppercase()) {
+    val shortAcronym = !v.contains(' ') && v.length <= 4
+    if (v.isNotEmpty() && v == v.uppercase() && !shortAcronym) {
       v = v.lowercase().split(" ").joinToString(" ") { w -> w.replaceFirstChar { it.titlecase() } }
     }
     return v.take(80)
+  }
+
+  /** A subtotal, total, tax, tip or payment line rather than something that was bought. */
+  fun isSummaryLine(text: String): Boolean {
+    val up = text.uppercase()
+    return SUBTOTAL.containsMatchIn(up) || TOTAL.containsMatchIn(up) || TAX.containsMatchIn(up) ||
+      TIP.containsMatchIn(up) || PAYMENT.containsMatchIn(up)
   }
 
   private fun findAddress(rows: List<String>, up: List<String>, vendorIdx: Int?): String {

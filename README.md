@@ -31,6 +31,16 @@ Gallery app: AGP 9.0.1, Gradle 9.2.1, Kotlin 2.2.21 with `-Xskip-metadata-versio
 The receipt logic (rule-based reader, model-output checks, Excel writer) lives in
 `app/src/main/java/com/expensescanner/app/core` and has no Android dependencies.
 
+## Testing
+
+- **Core logic:** `jvmtest/CoreTest.kt` runs on a plain JVM (rule-based reading of two sample
+  receipts, model-output checks, Excel output).
+- **Emulator smoke test:** Actions tab → *Smoke test on an emulator* → Run workflow. It installs
+  the app on an Android 14 emulator, shares a receipt into it, picks one from the photo picker,
+  opens a bill, saves the Excel report to Downloads and checks the file. Tick the AI option to
+  also download Gemma 4 E2B in the app and have it read a bill (about 25 minutes). Screenshots and
+  the log are pushed to the `smoke-results` branch.
+
 ## Signing key
 
 `keystore/` holds the key that signs every build, so updates install over the previous version.
