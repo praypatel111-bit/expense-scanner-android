@@ -34,8 +34,8 @@ object Exporter {
     rangeLabel: String,
     withPhotos: Boolean,
     fileName: String,
-    progress: (String) -> Unit,
     photoFolder: String? = null,
+    progress: (String) -> Unit,
   ): File {
     // Photos are shrunk one at a time while the file is written, so memory stays low.
     val photos: Map<String, PhotoForExcel>? = if (withPhotos) {
@@ -82,7 +82,7 @@ object Exporter {
     zipName: String,
     progress: (String) -> Unit,
   ): File {
-    val xlsx = buildXlsx(ctx, store, bills, settings, rangeLabel, withPhotos, xlsxName, progress, photoFolder = "$FOLDER/")
+    val xlsx = buildXlsx(ctx, store, bills, settings, rangeLabel, withPhotos, xlsxName, photoFolder = "$FOLDER/", progress = progress)
     val names = Report.photoFileNames(bills)
     val out = freshFile(ctx, zipName)
     ZipOutputStream(out.outputStream().buffered()).use { zip ->
