@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.expensescanner.app.ui
 
 import android.net.Uri
@@ -21,16 +23,22 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DateRangePicker
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDateRangePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -77,6 +85,10 @@ private fun range(preset: String, today: LocalDate = LocalDate.now()): Pair<Loca
   }
 }
 
+private const val DAY_MS = 86_400_000L
+
+private fun shortDate(d: LocalDate): String = d.format(DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.CANADA))
+
 private fun label(r: Pair<LocalDate?, LocalDate?>): String {
   val f = DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.CANADA)
   val (a, b) = r
@@ -92,13 +104,19 @@ fun ReportScreen(notify: (String) -> Unit) {
   val bills by app.store.bills.collectAsState()
   val settings by app.prefs.settings.collectAsState()
   var preset by rememberSaveable { mutableStateOf("this-month") }
+  // "Custom dates…": first and last day, as epoch days (inclusive).
+  var customFrom by rememberSaveable { mutableStateOf<Long?>(null) }
+  var customTo by rememberSaveable { mutableStateOf<Long?>(null) }
+  var picking by remember { mutableStateOf(false) }
   var photos by remember { mutableStateOf(app.prefs.includePhotos) }
   var busy by remember { mutableStateOf<String?>(null) }
   // The finished file waiting for "Save to my phone"; kept if Android recreates the screen meanwhile.
   var pendingPath by rememberSaveable { mutableStateOf<String?>(null) }
 
-  val r = range(preset)
-  val chosen = remember(bills, preset) {
+  val cf = customFrom
+  val ct = customTo
+  val r = if (preset == "custom" && cf != null && ct != null) LocalDate.ofEpochDay(cf) to LocalDate.ofEpochDay(ct) else range(preset)
+  val chosen = remember(bills, r) {
     val (a, b) = r
     bills.filter { bill ->
       val d = Books.parseIso(Books.recDate(bill))
@@ -119,7 +137,7 @@ fun ReportScreen(notify: (String) -> Unit) {
   val biz = settings.businessName.replace(Regex("""[\\/:*?"<>|]+"""), "").trim()
   val span = r.first?.let { a -> "${a} to ${r.second}" } ?: "all bills"
   val xlsxName = "${if (biz.isNotEmpty()) "$biz " else ""}Expense report $span.xlsx"
-  val zipName = "${if (biz.isNotEmpty()) "$biz " else ""}Receipt photos $span.zip"
+  val zipName = "${if (biz.isNotEmpty()) "$biz " else ""}Expenses and receipts $span.zip"
 
   val saveDoc = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(Exporter.XLSX)) { uri: Uri? ->
     val f = pendingPath?.let { File(it) }
@@ -133,7 +151,7 @@ fun ReportScreen(notify: (String) -> Unit) {
     val f = pendingPath?.let { File(it) }
     if (uri != null && f != null) scope.launch {
       runCatching { withContext(Dispatchers.IO) { Exporter.copyTo(ctx, f, uri) } }
-        .onSuccess { notify("Photos saved to your phone") }
+        .onSuccess { notify("Saved to your phone") }
         .onFailure { notify("Couldn't save the file: ${it.message}") }
     }
   }
@@ -148,7 +166,7 @@ fun ReportScreen(notify: (String) -> Unit) {
     scope.launch {
       try {
         val f = withContext(Dispatchers.Default) {
-          if (zip) Exporter.buildPhotosZip(ctx, app.store, chosen, zipName) { msg -> busy = msg }
+          if (zip) Exporter.buildZip(ctx, app.store, chosen, settings, label(r), photos, xlsxName, zipName) { msg -> busy = msg }
           else Exporter.buildXlsx(ctx, app.store, chosen, settings, label(r), photos, xlsxName) { msg -> busy = msg }
         }
         pendingPath = f.path
@@ -171,6 +189,12 @@ fun ReportScreen(notify: (String) -> Unit) {
     Text("Report", fontWeight = FontWeight.Bold, fontSize = 22.sp, color = p.ink)
     Gap(10)
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+      FilterChip(
+        selected = preset == "custom",
+        onClick = { picking = true },
+        leadingIcon = { Icon(Icons.Filled.DateRange, null, Modifier.size(18.dp)) },
+        label = { Text(if (preset == "custom" && cf != null && ct != null) "${shortDate(LocalDate.ofEpochDay(cf))} – ${shortDate(LocalDate.ofEpochDay(ct))}" else "Custom dates…") },
+      )
       PRESETS.forEach { (k, l) -> FilterChip(selected = preset == k, onClick = { preset = k }, label = { Text(l) }) }
     }
     Gap(6)
@@ -201,7 +225,10 @@ fun ReportScreen(notify: (String) -> Unit) {
     Gap(22)
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(p.paper).padding(16.dp)) {
       Text("Export to Excel", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = p.ink)
-      Text("Sheets: Summary, Expenses, Line items${if (photos) ", Receipt photos" else ""}.", color = p.muted, fontSize = 13.sp)
+      Text(
+        "Every bill on one sheet with an \"Open receipt\" link" + (if (photos) " that jumps to its photo inside the file" else "") + ". Also a Summary and Line items sheet.",
+        color = p.muted, fontSize = 13.sp,
+      )
       Gap(8)
       Row(Modifier.fillMaxWidth().clickable { photos = !photos; app.prefs.includePhotos = photos }, verticalAlignment = Alignment.CenterVertically) {
         Switch(checked = photos, onCheckedChange = { photos = it; app.prefs.includePhotos = it })
@@ -231,12 +258,24 @@ fun ReportScreen(notify: (String) -> Unit) {
         HGap(8)
         Text("Share Excel (email, WhatsApp…)")
       }
-      Gap(14)
-      Text("Receipt photos only (.zip)", fontWeight = FontWeight.SemiBold, color = p.ink)
-      Gap(6)
+      Gap(16)
+      Text("Download as .zip", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = p.ink)
+      Text(
+        "The Excel report plus all $photoCount receipt photo${if (photoCount == 1) "" else "s"} for " +
+          (r.first?.let { a -> "${shortDate(a)} to ${r.second?.let { shortDate(it) } ?: ""}" } ?: "all your bills") +
+          ", in one file. Pick other dates at the top of this page.",
+        color = p.muted, fontSize = 13.sp,
+      )
+      Gap(8)
       Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = { build(true) { f -> saveZip.launch(f.name) } }, enabled = busy == null && photoCount > 0, modifier = Modifier.weight(1f)) { Text("To my phone") }
-        OutlinedButton(onClick = { build(true) { f -> toDrive(f, Exporter.ZIP) } }, enabled = busy == null && photoCount > 0, modifier = Modifier.weight(1f)) { Text("To Google Drive") }
+        OutlinedButton(onClick = { build(true) { f -> saveZip.launch(f.name) } }, enabled = busy == null, modifier = Modifier.weight(1f)) { Text("To my phone") }
+        OutlinedButton(onClick = { build(true) { f -> toDrive(f, Exporter.ZIP) } }, enabled = busy == null, modifier = Modifier.weight(1f)) { Text("To Google Drive") }
+      }
+      Gap(8)
+      OutlinedButton(onClick = { build(true) { f -> Exporter.share(ctx, f, Exporter.ZIP) } }, enabled = busy == null, modifier = Modifier.fillMaxWidth()) {
+        Icon(Icons.Filled.Share, null)
+        HGap(8)
+        Text("Share .zip (email, WhatsApp…)")
       }
       busy?.let { msg ->
         Gap(10)
@@ -248,6 +287,36 @@ fun ReportScreen(notify: (String) -> Unit) {
       }
     }
     Gap(30)
+  }
+
+  if (picking) {
+    val state = rememberDateRangePickerState(
+      initialSelectedStartDateMillis = (r.first ?: LocalDate.now().withDayOfMonth(1)).toEpochDay() * DAY_MS,
+      initialSelectedEndDateMillis = (r.second ?: LocalDate.now()).toEpochDay() * DAY_MS,
+    )
+    DatePickerDialog(
+      onDismissRequest = { picking = false },
+      confirmButton = {
+        TextButton(
+          enabled = state.selectedStartDateMillis != null,
+          onClick = {
+            state.selectedStartDateMillis?.let { s ->
+              customFrom = s / DAY_MS
+              customTo = (state.selectedEndDateMillis ?: s) / DAY_MS
+              preset = "custom"
+            }
+            picking = false
+          },
+        ) { Text("Use these dates") }
+      },
+      dismissButton = { TextButton(onClick = { picking = false }) { Text("Cancel") } },
+    ) {
+      DateRangePicker(
+        state = state,
+        modifier = Modifier.weight(1f),
+        title = { Text("Bills from… to…", modifier = Modifier.padding(start = 24.dp, end = 12.dp, top = 16.dp)) },
+      )
+    }
   }
 }
 

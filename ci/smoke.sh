@@ -155,6 +155,36 @@ else
   fail excel-missing
 fi
 
+# 3b) Custom dates, then "Download as .zip" (Excel + Receipts folder) to the phone.
+adb shell input swipe 540 700 540 2000 200; adb shell input swipe 540 700 540 2000 200; sleep 2
+if tap "Custom dates"; then
+  sleep 3
+  shot 18_date_picker
+  tap "Use these dates" || fail date-picker
+  sleep 2
+  shot 19_custom_dates
+else
+  fail custom-dates-chip
+fi
+adb shell input swipe 540 1900 540 600 300; adb shell input swipe 540 1900 540 600 300; sleep 2
+shot 19b_zip_section
+if tap "To my phone"; then
+  sleep 8
+  tap "Save" || fail zip-save-dialog
+  sleep 5
+else
+  fail zip-button
+fi
+ZIP=$(adb shell "ls /storage/emulated/0/Download/*.zip 2>/dev/null" | tr -d '\r' | head -1)
+if [ -n "$ZIP" ]; then
+  echo "Zip saved at $ZIP"
+  adb pull "$ZIP" "$OUT/" >/dev/null
+  python3 ci/check_xlsx.py "$OUT"/*.zip || fail zip-file
+else
+  echo "No .zip found on the emulator"
+  fail zip-missing
+fi
+
 # 4) Optional: download the AI model in the app and let it read the long receipt.
 if [ "${SMOKE_AI:-0}" = "1" ]; then
   adb shell am start -n "$PKG/.MainActivity" >/dev/null; sleep 2

@@ -100,8 +100,14 @@ fun main() {
   check(made == 0, "photos are not loaded while the report is built")
   File("kt_report.xlsx").outputStream().use { wb.write(it) }
   check(made == 2, "each photo is loaded exactly once while writing (got $made)")
-  val wb2 = Report.build(listOf(bill1, bill2, bill3, bill4), settings, "All bills", null, today)
+  val withFiles = listOf(bill1.copy(photo = "b1.jpg"), bill2.copy(photo = "b2.jpg"), bill3, bill4)
+  val wb2 = Report.build(withFiles, settings, "All bills", null, today)
   File("kt_report_nophotos.xlsx").outputStream().use { wb2.write(it) }
+  // The Excel inside the .zip download (photos not embedded): links open Receipts/<file>.jpg.
+  val wb3 = Report.build(withFiles, settings, "All bills", null, today, photoFolder = "Receipts/")
+  File("kt_report_zip.xlsx").outputStream().use { wb3.write(it) }
+  val names = Report.photoFileNames(listOf(bill4.copy(photo = "x.jpg"), bill1.copy(photo = "a.jpg"), bill3.copy(photo = "c.jpg", vendor = bill1.vendor, total = bill1.total, date = bill1.date, num = bill1.num)))
+  check(names.values.toSet().size == 3 && names.values.all { it.endsWith(".jpg") }, "photo file names are unique: " + names.values)
   println("schema: " + Extract.schema(DEFAULT_CATEGORIES.map { it.id }).take(160) + "...")
   println("prompt chars: " + Extract.buildPrompt(tims, settings, today).length)
   println(if (failures == 0) "ALL PASSED" else "$failures FAILED")

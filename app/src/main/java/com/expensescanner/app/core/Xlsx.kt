@@ -42,6 +42,8 @@ class XlsxWriter(private val title: String, private val creator: String) {
   inner class Sheet(val name: String, val cols: List<Double>, val freeze: Int) {
     val rows = ArrayList<Pair<List<Cell?>, Double?>>()
     val links = ArrayList<Triple<String, String, String>>()
+    /** Links to files next to the workbook (relative paths such as Receipts/R-0001.jpg). */
+    val fileLinks = ArrayList<Triple<String, String, String>>()
     val images = ArrayList<SheetImage>()
     var autoFilter: String? = null
 
@@ -52,6 +54,10 @@ class XlsxWriter(private val title: String, private val creator: String) {
 
     fun addLink(row: Int, col: Int, location: String, display: String) {
       links.add(Triple(ref(row, col), location, display))
+    }
+
+    fun addFileLink(row: Int, col: Int, target: String, display: String) {
+      fileLinks.add(Triple(ref(row, col), target, display))
     }
   }
 
@@ -201,9 +207,10 @@ class XlsxWriter(private val title: String, private val creator: String) {
     }
     sb.append("</sheetData>")
     sh.autoFilter?.let { sb.append("<autoFilter ref=\"$it\"/>") }
-    if (sh.links.isNotEmpty()) {
+    if (sh.links.isNotEmpty() || sh.fileLinks.isNotEmpty()) {
       sb.append("<hyperlinks>")
       for ((rf, loc, disp) in sh.links) sb.append("<hyperlink ref=\"$rf\" location=\"${x(loc)}\" display=\"${x(disp)}\"/>")
+      sh.fileLinks.forEachIndexed { i, (rf, _, disp) -> sb.append("<hyperlink ref=\"$rf\" r:id=\"rIdL${i + 1}\" display=\"${x(disp)}\"/>") }
       sb.append("</hyperlinks>")
     }
     sb.append("<pageMargins left=\"0.5\" right=\"0.5\" top=\"0.6\" bottom=\"0.6\" header=\"0.3\" footer=\"0.3\"/>")
@@ -271,9 +278,16 @@ class XlsxWriter(private val title: String, private val creator: String) {
         fun abs(cr: String) = cr.replace(Regex("^([A-Z]+)(\\d+)$"), "\\$$1\\$$2")
         defined.append("<definedName name=\"_xlnm._FilterDatabase\" localSheetId=\"$i\" hidden=\"1\">'${x(names[i].replace("'", "''"))}'!${abs(a)}:${abs(b)}</definedName>")
       }
+      if (sh.images.isNotEmpty() || sh.fileLinks.isNotEmpty()) {
+        val sr = StringBuilder(head).append("<Relationships xmlns=\"$nsPkg\">")
+        if (sh.images.isNotEmpty()) sr.append("<Relationship Id=\"rId1\" Type=\"$rel/drawing\" Target=\"../drawings/drawing${drawingNo + 1}.xml\"/>")
+        sh.fileLinks.forEachIndexed { k, (_, target, _) ->
+          sr.append("<Relationship Id=\"rIdL${k + 1}\" Type=\"$rel/hyperlink\" Target=\"${x(target)}\" TargetMode=\"External\"/>")
+        }
+        parts.add("xl/worksheets/_rels/sheet$n.xml.rels" to sr.append("</Relationships>").toString())
+      }
       if (sh.images.isNotEmpty()) {
         drawingNo++
-        parts.add("xl/worksheets/_rels/sheet$n.xml.rels" to "$head<Relationships xmlns=\"$nsPkg\"><Relationship Id=\"rId1\" Type=\"$rel/drawing\" Target=\"../drawings/drawing$drawingNo.xml\"/></Relationships>")
         parts.add("xl/drawings/drawing$drawingNo.xml" to drawingXml(sh.images))
         ct.append("<Override PartName=\"/xl/drawings/drawing$drawingNo.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.drawing+xml\"/>")
         val dr = StringBuilder(head).append("<Relationships xmlns=\"$nsPkg\">")

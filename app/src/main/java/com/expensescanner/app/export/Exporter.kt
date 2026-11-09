@@ -14,6 +14,7 @@ import com.expensescanner.app.core.Report
 import com.expensescanner.app.data.BillStore
 import java.io.File
 import java.io.IOException
+import java.util.zip.Deflater
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -34,6 +35,7 @@ object Exporter {
     withPhotos: Boolean,
     fileName: String,
     progress: (String) -> Unit,
+    photoFolder: String? = null,
   ): File {
     // Photos are shrunk one at a time while the file is written, so memory stays low.
     val photos: Map<String, PhotoForExcel>? = if (withPhotos) {
@@ -51,7 +53,7 @@ object Exporter {
       }
     } else null
     progress("Building the Excel file…")
-    val wb = Report.build(bills, settings, rangeLabel, photos)
+    val wb = Report.build(bills, settings, rangeLabel, photos, photoFolder = photoFolder)
     val out = freshFile(ctx, fileName)
     out.outputStream().buffered().use { wb.write(it) }
     return out
@@ -64,24 +66,45 @@ object Exporter {
     return File(dir(ctx), fileName)
   }
 
-  fun buildPhotosZip(ctx: Context, store: BillStore, bills: List<Bill>, fileName: String, progress: (String) -> Unit): File {
-    val out = freshFile(ctx, fileName)
-    val names = HashSet<String>()
+  /**
+   * One download for the chosen dates: the Excel report plus every receipt photo in a "Receipts"
+   * folder (R-0001_2026-11-09_Tim-Hortons_14.35.jpg). When the photos aren't inside the Excel file,
+   * its "Open receipt" links open these photo files once the .zip is unzipped.
+   */
+  fun buildZip(
+    ctx: Context,
+    store: BillStore,
+    bills: List<Bill>,
+    settings: AppSettings,
+    rangeLabel: String,
+    withPhotos: Boolean,
+    xlsxName: String,
+    zipName: String,
+    progress: (String) -> Unit,
+  ): File {
+    val xlsx = buildXlsx(ctx, store, bills, settings, rangeLabel, withPhotos, xlsxName, progress, photoFolder = "$FOLDER/")
+    val names = Report.photoFileNames(bills)
+    val out = freshFile(ctx, zipName)
     ZipOutputStream(out.outputStream().buffered()).use { zip ->
-      val withPhoto = bills.filter { it.photo != null }
-      withPhoto.forEachIndexed { i, b ->
-        progress("Collecting photos: ${i + 1} of ${withPhoto.size}")
-        val f = store.photoFile(b)?.takeIf { it.exists() } ?: return@forEachIndexed
-        var name = Report.photoFileName(b)
-        var k = 2
-        while (!names.add(name)) name = Report.photoFileName(b).removeSuffix(".jpg") + "_${k++}.jpg"
-        zip.putNextEntry(ZipEntry(name))
+      zip.setLevel(Deflater.BEST_SPEED) // photos and the Excel file are already compressed
+      zip.putNextEntry(ZipEntry(xlsxName))
+      xlsx.inputStream().use { it.copyTo(zip) }
+      zip.closeEntry()
+      var done = 0
+      for (b in bills) {
+        val name = names[b.id] ?: continue
+        val f = store.photoFile(b)?.takeIf { it.exists() } ?: continue
+        progress("Packing photos: ${++done} of ${names.size}")
+        zip.putNextEntry(ZipEntry("$FOLDER/$name"))
         f.inputStream().use { it.copyTo(zip) }
         zip.closeEntry()
       }
     }
+    xlsx.delete()
     return out
   }
+
+  private const val FOLDER = "Receipts"
 
   fun copyTo(ctx: Context, src: File, dest: Uri) {
     // "wt" truncates when replacing an existing file; not every provider supports it.
